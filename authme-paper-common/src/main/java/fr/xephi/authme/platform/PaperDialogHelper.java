@@ -11,20 +11,29 @@ import io.papermc.paper.registry.data.dialog.input.DialogInput;
 import io.papermc.paper.registry.data.dialog.type.DialogType;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Encapsulates the Paper-derived dialog API calls used by Paper and Folia.
  */
 public final class PaperDialogHelper {
 
-    private static final LegacyComponentSerializer LEGACY_SERIALIZER = LegacyComponentSerializer.legacySection();
+    private static volatile PaperDialogStyle style = PaperDialogStyle.DEFAULT;
 
     private PaperDialogHelper() {
+    }
+
+    /**
+     * Sets the presentation style used for all dialogs built from now on.
+     *
+     * @param dialogStyle the style to apply
+     */
+    public static void useStyle(PaperDialogStyle dialogStyle) {
+        style = Objects.requireNonNull(dialogStyle, "dialogStyle");
     }
 
     static void closeDialog(Player player) {
@@ -32,27 +41,28 @@ public final class PaperDialogHelper {
     }
 
     static void showLoginDialog(Player player, DialogWindowSpec dialog) {
-        player.showDialog(createInGameCommandDialog(dialog, "login $(password)"));
+        player.showDialog(createInGameCommandDialog(dialog, PaperDialogStyle.Kind.LOGIN, "login $(password)"));
     }
 
     static void showTotpDialog(Player player, DialogWindowSpec dialog) {
-        player.showDialog(createInGameCommandDialog(dialog, "2fa code $(code)"));
+        player.showDialog(createInGameCommandDialog(dialog, PaperDialogStyle.Kind.TWO_FACTOR, "2fa code $(code)"));
     }
 
     static void showRegisterDialog(Player player, RegistrationType type, RegisterSecondaryArgument secondArg,
                                    DialogWindowSpec dialog) {
-        player.showDialog(createInGameCommandDialog(dialog, createRegisterTemplate(type, secondArg)));
+        player.showDialog(createInGameCommandDialog(dialog, PaperDialogStyle.Kind.REGISTER,
+            createRegisterTemplate(type, secondArg)));
     }
 
     public static Dialog createPreJoinLoginDialog(DialogWindowSpec dialog) {
-        DialogBase base = DialogBase.builder(legacyComponent(dialog.title()))
+        DialogBase base = DialogBase.builder(createTitle(dialog))
             .inputs(createInputs(dialog))
-            .body(createBody(dialog))
+            .body(createBody(dialog, PaperDialogStyle.Kind.LOGIN))
             .canCloseWithEscape(dialog.canCloseWithEscape())
             .afterAction(DialogBase.DialogAfterAction.WAIT_FOR_RESPONSE)
             .build();
 
-        ActionButton loginButton = ActionButton.builder(legacyComponent(dialog.primaryButtonLabel()))
+        ActionButton loginButton = createButton(dialog.primaryButtonLabel(), preJoinButtonCount(dialog))
             .action(DialogAction.customClick(PaperDialogActionKeys.PRE_JOIN_LOGIN_SUBMIT, null))
             .build();
 
@@ -63,68 +73,72 @@ public final class PaperDialogHelper {
 
         return Dialog.create(factory -> factory.empty()
             .base(base)
-            .type(DialogType.multiAction(createPreJoinButtons(dialog, loginButton, secondaryKey)).build()));
+            .type(createActions(createPreJoinButtons(dialog, loginButton, secondaryKey))));
     }
 
     public static Dialog createPreJoinRecoveryDialog(DialogWindowSpec dialog) {
-        DialogBase base = DialogBase.builder(legacyComponent(dialog.title()))
+        DialogBase base = DialogBase.builder(createTitle(dialog))
             .inputs(createInputs(dialog))
-            .body(createBody(dialog))
+            .body(createBody(dialog, PaperDialogStyle.Kind.RECOVERY))
             .canCloseWithEscape(false)
             .afterAction(DialogBase.DialogAfterAction.WAIT_FOR_RESPONSE)
             .build();
 
-        ActionButton submitButton = ActionButton.builder(legacyComponent(dialog.primaryButtonLabel()))
+        ActionButton submitButton = createButton(dialog.primaryButtonLabel(), preJoinButtonCount(dialog))
             .action(DialogAction.customClick(PaperDialogActionKeys.PRE_JOIN_RECOVERY_SUBMIT, null))
             .build();
 
         return Dialog.create(factory -> factory.empty()
             .base(base)
-            .type(DialogType.multiAction(createPreJoinButtons(dialog, submitButton,
-                PaperDialogActionKeys.PRE_JOIN_RECOVERY_CANCEL)).build()));
+            .type(createActions(createPreJoinButtons(dialog, submitButton,
+                PaperDialogActionKeys.PRE_JOIN_RECOVERY_CANCEL))));
     }
 
     public static Dialog createPreJoinRegisterDialog(DialogWindowSpec dialog) {
-        DialogBase base = DialogBase.builder(legacyComponent(dialog.title()))
+        DialogBase base = DialogBase.builder(createTitle(dialog))
             .inputs(createInputs(dialog))
-            .body(createBody(dialog))
+            .body(createBody(dialog, PaperDialogStyle.Kind.REGISTER))
             .canCloseWithEscape(dialog.canCloseWithEscape())
             .afterAction(DialogBase.DialogAfterAction.WAIT_FOR_RESPONSE)
             .build();
 
-        ActionButton registerButton = ActionButton.builder(legacyComponent(dialog.primaryButtonLabel()))
+        ActionButton registerButton = createButton(dialog.primaryButtonLabel(), preJoinButtonCount(dialog))
             .action(DialogAction.customClick(PaperDialogActionKeys.PRE_JOIN_REGISTER_SUBMIT, null))
             .build();
 
         return Dialog.create(factory -> factory.empty()
             .base(base)
-            .type(DialogType.multiAction(createPreJoinButtons(dialog,
+            .type(createActions(createPreJoinButtons(dialog,
                 registerButton,
-                PaperDialogActionKeys.PRE_JOIN_REGISTER_CANCEL)).build()));
+                PaperDialogActionKeys.PRE_JOIN_REGISTER_CANCEL))));
     }
 
-    private static Dialog createInGameCommandDialog(DialogWindowSpec dialog, String commandTemplate) {
-        DialogBase base = DialogBase.builder(legacyComponent(dialog.title()))
+    private static Dialog createInGameCommandDialog(DialogWindowSpec dialog, PaperDialogStyle.Kind kind,
+                                                    String commandTemplate) {
+        DialogBase base = DialogBase.builder(createTitle(dialog))
             .inputs(createInputs(dialog))
-            .body(createBody(dialog))
+            .body(createBody(dialog, kind))
             .afterAction(DialogBase.DialogAfterAction.CLOSE)
             .build();
 
-        ActionButton primaryButton = ActionButton.builder(legacyComponent(dialog.primaryButtonLabel()))
+        boolean showSecondaryButton = dialog.showSecondaryButton() && dialog.secondaryButtonCommand() != null;
+        int buttonCount = showSecondaryButton ? 2 : 1;
+
+        ActionButton primaryButton = createButton(dialog.primaryButtonLabel(), buttonCount)
             .action(DialogAction.commandTemplate(commandTemplate))
             .build();
 
         List<ActionButton> buttons = new ArrayList<>();
         buttons.add(primaryButton);
-        if (dialog.showSecondaryButton() && dialog.secondaryButtonCommand() != null) {
-            buttons.add(ActionButton.builder(legacyComponent(dialog.secondaryButtonLabel()))
+        if (showSecondaryButton) {
+            buttons.add(createButton(dialog.secondaryButtonLabel(), buttonCount)
                 .action(DialogAction.commandTemplate(dialog.secondaryButtonCommand()))
                 .build());
         }
 
         return Dialog.create(factory -> factory.empty()
             .base(base)
-            .type(DialogType.multiAction(buttons).build()));
+            .type(createActions(buttons)));
     }
 
     private static List<ActionButton> createPreJoinButtons(DialogWindowSpec dialog,
@@ -133,28 +147,44 @@ public final class PaperDialogHelper {
         List<ActionButton> buttons = new ArrayList<>();
         buttons.add(primaryButton);
         if (dialog.showSecondaryButton()) {
-            buttons.add(ActionButton.builder(legacyComponent(dialog.secondaryButtonLabel()))
+            buttons.add(createButton(dialog.secondaryButtonLabel(), preJoinButtonCount(dialog))
                 .action(DialogAction.customClick(cancelActionKey, null))
                 .build());
         }
         return buttons;
     }
 
+    private static int preJoinButtonCount(DialogWindowSpec dialog) {
+        return dialog.showSecondaryButton() ? 2 : 1;
+    }
+
+    private static Component createTitle(DialogWindowSpec dialog) {
+        return style.title(createText(dialog.title()));
+    }
+
+    private static ActionButton.Builder createButton(String label, int buttonCount) {
+        return style.button(ActionButton.builder(createText(label)), buttonCount);
+    }
+
+    private static DialogType createActions(List<ActionButton> buttons) {
+        return style.actions(DialogType.multiAction(buttons), buttons.size()).build();
+    }
+
     private static List<DialogInput> createInputs(DialogWindowSpec dialog) {
         List<DialogInput> inputs = new ArrayList<>();
         for (DialogInputSpec input : dialog.inputs()) {
-            inputs.add(DialogInput.text(input.id(), legacyComponent(input.label()))
-                .maxLength(input.maxLength())
+            inputs.add(style.input(DialogInput.text(input.id(), createText(input.label()))
+                .maxLength(input.maxLength()))
                 .build());
         }
         return inputs;
     }
 
-    private static List<DialogBody> createBody(DialogWindowSpec dialog) {
+    private static List<DialogBody> createBody(DialogWindowSpec dialog, PaperDialogStyle.Kind kind) {
         if (dialog.body() == null) {
             return List.of();
         }
-        return List.of(DialogBody.plainMessage(legacyComponent(dialog.body())));
+        return style.body(kind, createText(dialog.body()));
     }
 
     private static String createRegisterTemplate(RegistrationType type, RegisterSecondaryArgument secondArg) {
@@ -175,7 +205,7 @@ public final class PaperDialogHelper {
         return "register $(password)";
     }
 
-    private static Component legacyComponent(String text) {
-        return LEGACY_SERIALIZER.deserialize(text);
+    private static Component createText(String text) {
+        return style.text(text);
     }
 }

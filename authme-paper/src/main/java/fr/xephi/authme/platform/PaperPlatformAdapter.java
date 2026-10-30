@@ -24,6 +24,9 @@ public class PaperPlatformAdapter extends AbstractPaperPlatformAdapter {
      * Constructor.
      */
     public PaperPlatformAdapter() {
+        if (isDialogSupported()) {
+            PaperDialogHelper.useStyle(new PaperModernDialogStyle());
+        }
     }
 
     @Override
